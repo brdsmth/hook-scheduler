@@ -2,19 +2,16 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	localConfig "hook-scheduler/config"
 	"log"
 	"sync"
 
-	gonanoid "github.com/matoous/go-nanoid"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 var RabbitMQConn *amqp.Connection
 var RabbitMQConnMutex sync.Mutex
-
-type Job struct {
-	Data string
-}
 
 func ConnectToRabbitMQ(rabbitMQURL string) {
 	var err error
@@ -25,7 +22,7 @@ func ConnectToRabbitMQ(rabbitMQURL string) {
 	log.Println("Connected to RabbitMQ successfully")
 }
 
-func Queue(jobs []*Job) {
+func Queue(jobs []Job) {
 
 	// Load RabbitMQ
 	RabbitMQConnMutex.Lock()
@@ -34,6 +31,12 @@ func Queue(jobs []*Job) {
 	if RabbitMQConn == nil {
 		log.Println("RabbitMQ connection is not available")
 		return
+	}
+
+	// Pull the name of the RabbitMQ queue from env
+	rabbitMQQueue := localConfig.ReadEnv("RABBITMQ_QUEUE")
+	if rabbitMQQueue == "" {
+		log.Fatal("RABBITMQ_QUEUE environment variable not set")
 	}
 
 	// Create a channel
@@ -45,7 +48,7 @@ func Queue(jobs []*Job) {
 	defer ch.Close()
 
 	// Declare the queue
-	_, err = ch.QueueDeclare("QUEUE", false, false, false, false, nil)
+	_, err = ch.QueueDeclare(rabbitMQQueue, false, false, false, false, nil)
 	if err != nil {
 		log.Printf("Failed to declare a queue: %v", err)
 		return
@@ -56,19 +59,16 @@ func Queue(jobs []*Job) {
 
 	// Publish to queue
 	for _, job := range jobs {
-		// Identify job
-		id, err := gonanoid.Nanoid(6)
+		// Serialize job data
+		jobData, err := json.Marshal(job)
 		if err != nil {
-			log.Printf("error adding nanoid: %s", err)
-			return
+			log.Printf("Error marshaling job: %v", err)
+			continue // Skip this job and move to the next
 		}
-		log.Printf("Queue job:\t\t%s", id)
 
-		err = ch.PublishWithContext(ctx, "", "QUEUE", false, false, amqp.Publishing{
-			// // Application or exchange specific fields,
-			// // the headers exchange will inspect this field.
+		err = ch.PublishWithContext(ctx, "", rabbitMQQueue, false, false, amqp.Publishing{
+			// INFO -> below are additional details possible in RabbitMQ
 			// Headers Table
-			// // Properties
 			// ContentType     string    // MIME content type
 			// ContentEncoding string    // MIME content encoding
 			// DeliveryMode    uint8     // Transient (0 or 1) or Persistent (2)
@@ -81,14 +81,14 @@ func Queue(jobs []*Job) {
 			// Type            string    // message type name
 			// UserId          string    // creating user id - ex: "guest"
 			// AppId           string    // creating application id
-
-			// // The application specific payload of the message
-			// Body []byte
-			ContentType: "text/plain",
-			Body:        []byte(job.Data), // Assuming Task has a Data field
+			// Body []byte				 // Send the serialized job data
+			ContentType: "application/json",
+			Body:        jobData,
 		})
 		if err != nil {
-			log.Printf("Failed to publish task: %v", err)
+			log.Printf("Failed to publish job to RabbitMQ: %v", err)
+		} else {
+			log.Printf("Published job:\t%s", job.RowKey)
 		}
 	}
 }

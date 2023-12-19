@@ -10,13 +10,6 @@ import (
 func main() {
 	var err error
 
-	// Connect to MongoDB
-	mongoDBURL := config.ReadEnv("MONGODB_URI")
-	if mongoDBURL == "" {
-		log.Fatal("MONGODB_URI environment variable not set")
-	}
-	services.ConnectMongoDB(mongoDBURL)
-
 	// Connect to DynamoDB
 	services.ConnectDynamoDB()
 
@@ -36,11 +29,7 @@ func main() {
 	// Initiate cron
 	services.RunCron()
 
-	// Define routes and handlers for sending SMS messages
-	// http.HandleFunc("/queue-sms", handlers.QueueSMSHandler)
-	// http.HandleFunc("/schedule-sms", handlers.ScheduleSMSHandler)
-
 	// Start the HTTP server for the publisher microservice
-	log.Println("Server listening on 8080")
-	http.ListenAndServe(":8080", nil)
+	log.Println("Server listening on 8082")
+	http.ListenAndServe(":8082", nil)
 }
